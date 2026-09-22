@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tests bingo</title>
+<body style="font:14px monospace;background:#111;color:#eee;padding:1rem">
+<pre id="out"></pre>
+<script type="module">
+import { generateGame, rankMap, firstWinners, evaluate, findCard, checkClaim, mulberry32, PRIZES, cardTimes } from '../js/bingo.js';
+
+const out = document.getElementById('out');
+let fails = 0, passes = 0;
+const log = (s) => (out.textContent += s + '\n');
+function ok(cond, msg) { cond ? passes++ : (fails++, log('FAIL: ' + msg)); }
+
+const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: 't' + i, uri: 'u' + i, name: 'N' + i, artist: 'A' }));
+
+// 1) Garantía de premios únicos en muchas configuraciones y semillas
+const configs = [
+  { n: 20, rows: 3, cols: 5, pool: 60, tracks: 90 },
+  { n: 50, rows: 3, cols: 5, pool: 75, tracks: 100 },
+  { n: 100, rows: 3, cols: 5, pool: 90, tracks: 90 },
+  { n: 10, rows: 3, cols: 5, pool: 30, tracks: 40 },
+  { n: 30, rows: 4, cols: 4, pool: 50, tracks: 50 },
+  { n: 3, rows: 3, cols: 5, pool: 40, tracks: 40 },
+  { n: 1, rows: 3, cols: 5, pool: 40, tracks: 40 },
+  { n: 2, rows: 2, cols: 3, pool: 12, tracks: 12 },
+  { n: 200, rows: 3, cols: 5, pool: 100, tracks: 100 },
+];
+const t0 = performance.now();
+for (const c of configs) {
+  for (let seed = 1; seed <= 25; seed++) {
+    const label = `n=${c.n} ${c.rows}x${c.cols} pool=${c.pool} seed=${seed}`;
+    let g;
+    try {
+      g = generateGame({ tracks: mk(c.tracks), n: c.n, rows: c.rows, cols: c.cols, pool: c.pool, rng: mulberry32(seed) });
+    } catch (e) { ok(false, label + ' lanzó: ' + e.message); continue; }
+    const rank = rankMap(g.order);
+    const fw = firstWinners(g.cards, rank, g.rows, g.cols);
+    const calls = PRIZES.map((p) => fw[p].call);
+    for (const p of PRIZES) ok(fw[p].cards.length === 1, `${label}: ${p} empatado entre ${fw[p].cards.map((x) => x.n)}`);
+    ok(new Set(calls).size === 3, `${label}: premios en la misma canción ${calls}`);
+    if (c.n >= 3) ok(new Set(PRIZES.map((p) => fw[p].cards[0].n)).size === 3, `${label}: un mismo ganador para varios premios`);
+    // cartillas: celdas distintas, del orden, tamaño correcto, sin duplicados
+    const keys = new Set();
+    for (const card of g.cards) {
+      ok(card.cells.length === c.rows * c.cols && new Set(card.cells).size === card.cells.length, `${label}: cartilla ${card.n} mal formada`);
+      ok(card.cells.every((id) => rank.has(id)), `${label}: canción fuera de juego`);
+      keys.add(card.cells.slice().sort().join());
+    }
+    ok(keys.size === g.cards.length, `${label}: cartillas duplicadas`);
+    ok(new Set(g.cards.map((x) => x.code)).size === g.cards.length, `${label}: códigos repetidos`);
+    // coherencia con evaluate: en la llamada `call`, la ganadora tiene el premio y en call-1 nadie
+    for (const p of PRIZES) {
+      const winner = fw[p].cards[0];
+      ok(evaluate(winner, rank, fw[p].call, g.rows, g.cols).hit[p], `${label}: evaluate no ve ${p} ganador`);
+      ok(g.cards.every((x) => !evaluate(x, rank, fw[p].call - 1, g.rows, g.cols).hit[p]), `${label}: alguien tenía ${p} antes`);
+      ok(g.cards.filter((x) => evaluate(x, rank, fw[p].call, g.rows, g.cols).hit[p]).length === 1, `${label}: >1 con ${p} en su llamada`);
+    }
+    ok(g.stats.line.n === fw.line.cards[0].n, `${label}: stats incoherentes`);
+  }
+}
+log(`Generación: ${configs.length * 25} partidas en ${Math.round(performance.now() - t0)} ms`);
+
+// 2) Evaluación y comprobación con una cartilla conocida (3x5)
+{
+  const ids = Array.from({ length: 30 }, (_, i) => 'x' + i);
+  const rank = rankMap(ids);
+  const card = { n: 7, code: 'BCDF', cells: ids.slice(0, 15) };
+  const other = { n: 8, code: 'GHJK', cells: ids.slice(15, 30) };
+  let ev = evaluate(card, rank, 5, 3, 5);
+  ok(ev.line.marked === 5 && ev.hit.line && !ev.hit.corner && !ev.hit.bingo, 'fila 0 completa tras 5 canciones');
+  ok(ev.corner.marked === 2, 'esquinas superiores marcadas');
+  ev = evaluate(card, rank, 15, 3, 5);
+  ok(ev.hit.line && ev.hit.corner && ev.hit.bingo && ev.bingo.marked === 15, 'bingo tras 15');
+  ev = evaluate(card, rank, 4, 3, 5);
+  ok(ev.line.need === 1 && !ev.hit.line, 'a 1 de línea');
+  ok(findCard([card, other], '07').n === 7 && findCard([card, other], 'ghjk').n === 8 && findCard([card, other], 'zz') === null, 'findCard por nº y código');
+  let r = checkClaim({ card, cards: [card, other], prize: 'line', rank, pos: 4, rows: 3, cols: 5 });
+  ok(!r.valid && r.missing.length === 1 && r.missing[0] === 'x4', 'línea no válida lista la canción que falta');
+  r = checkClaim({ card, cards: [card, other], prize: 'line', rank, pos: 10, rows: 3, cols: 5 });
+  ok(r.valid && r.call === 5 && r.earlier.length === 0, 'línea válida');
+  r = checkClaim({ card: other, cards: [card, other], prize: 'line', rank, pos: 30, rows: 3, cols: 5 });
+  ok(r.valid && r.earlier.length === 1 && r.earlier[0].n === 7, 'aviso de que otra cartilla lo completó antes');
+  r = checkClaim({ card, cards: [card, other], prize: 'corner', rank, pos: 8, rows: 3, cols: 5 });
+  ok(!r.valid && r.missing.length === 2, 'esquina: faltan las 2 inferiores');
+}
+
+log(fails ? `\n❌ ${fails} fallos, ${passes} correctos` : `\n✅ Todo correcto (${passes} comprobaciones)`);
+document.title = fails ? 'FAIL' : 'PASS';
+</script>

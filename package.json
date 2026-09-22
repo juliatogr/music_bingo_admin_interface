@@ -1,0 +1,13 @@
+{
+  "name": "bingo-musical",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bingo musical con una lista de Spotify (PWA)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121212">
+  <meta name="description" content="Bingo musical con tu lista de Spotify: cartillas, control de premios y comprobación.">
+  <title>Bingo Musical</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>🎵 Bingo Musical</h1>
+    <span id="status-pill" class="pill"></span>
+  </header>
+
+  <main>
+    <!-- AJUSTES -->
+    <section id="tab-setup" class="tab" hidden>
+      <div class="card">
+        <h2>1 · Conectar con Spotify</h2>
+        <p class="muted">Hace falta Spotify Premium. Crea una app en el <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">panel de desarrolladores</a>, añade abajo la URI de redirección y pega su Client ID.</p>
+        <label>Client ID
+          <input id="client-id" autocomplete="off" spellcheck="false" placeholder="p. ej. 1a2b3c…">
+        </label>
+        <div class="redirect">
+          <span class="muted">URI de redirección:</span>
+          <code id="redirect-uri"></code>
+          <button class="small" data-action="copy-redirect">Copiar</button>
+        </div>
+        <div class="row">
+          <button class="primary" id="btn-connect" data-action="connect">Conectar</button>
+          <button data-action="disconnect" id="btn-disconnect">Desconectar</button>
+        </div>
+        <p id="auth-msg" class="msg" hidden></p>
+      </div>
+
+      <div class="card">
+        <h2>2 · Lista de reproducción</h2>
+        <div id="playlist-current" class="muted">Ninguna lista cargada.</div>
+        <div class="row">
+          <button data-action="reload-playlist" id="btn-reload">Recargar lista de Spotify</button>
+          <button data-action="demo">Lista de demostración (sin Spotify)</button>
+        </div>
+        <p class="muted small-text">La lista está fijada en <code>js/config.js</code>. Se carga sola al conectar; recárgala si has añadido o quitado canciones (después habrá que generar cartillas nuevas).</p>
+      </div>
+
+      <div class="card">
+        <h2>3 · Dónde suena la música</h2>
+        <div class="row">
+          <select id="device-select"></select>
+          <button data-action="refresh-devices">Actualizar</button>
+        </div>
+        <p class="muted small-text">«Este navegador» funciona en ordenadores. En móvil abre la app de Spotify y elige ese dispositivo en la lista.</p>
+        <p id="device-msg" class="msg" hidden></p>
+      </div>
+    </section>
+
+    <!-- CARTILLAS -->
+    <section id="tab-cards" class="tab" hidden>
+      <div class="card">
+        <h2>Nueva partida</h2>
+        <div class="form-grid">
+          <label>Cartillas <input id="cfg-n" type="number" min="1" max="500" inputmode="numeric"></label>
+          <label>Canciones en juego <input id="cfg-pool" type="number" min="5" max="500" inputmode="numeric"></label>
+          <label>Filas <input id="cfg-rows" type="number" min="2" max="5" inputmode="numeric"></label>
+          <label>Columnas <input id="cfg-cols" type="number" min="3" max="7" inputmode="numeric"></label>
+        </div>
+        <p id="gen-hint" class="muted small-text"></p>
+        <button class="primary block" data-action="generate">Generar cartillas y empezar partida nueva</button>
+        <p id="gen-msg" class="msg" hidden></p>
+      </div>
+      <div id="guarantee"></div>
+      <div id="cards-toolbar" class="card" hidden>
+        <div class="row">
+          <button data-action="print">🖨 Imprimir cartillas</button>
+          <button data-action="reset-game">Reiniciar partida (mismas cartillas)</button>
+        </div>
+        <label class="inline">Ordenar por
+          <select id="sort">
+            <option value="n">Número</option>
+            <option value="line">Cerca de línea</option>
+            <option value="corner">Cerca de esquina</option>
+            <option value="bingo">Cerca de bingo</option>
+          </select>
+        </label>
+      </div>
+      <div id="cards-list"></div>
+    </section>
+
+    <!-- JUEGO -->
+    <section id="tab-game" class="tab" hidden>
+      <div id="game-view"></div>
+    </section>
+
+    <!-- COMPROBAR -->
+    <section id="tab-check" class="tab" hidden>
+      <div class="card">
+        <h2>Comprobar premio</h2>
+        <div class="chips" id="prize-chips" role="radiogroup" aria-label="Premio cantado">
+          <button class="chip active" data-prize="line" role="radio" aria-checked="true">Línea</button>
+          <button class="chip" data-prize="corner" role="radio" aria-checked="false">Esquina</button>
+          <button class="chip" data-prize="bingo" role="radio" aria-checked="false">Bingo</button>
+        </div>
+        <form id="check-form" class="row">
+          <input id="check-tag" placeholder="Nº o código de la cartilla" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <button class="primary" type="submit">Comprobar</button>
+        </form>
+      </div>
+      <div id="check-result"></div>
+      <div id="awards"></div>
+    </section>
+  </main>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="setup"><span>⚙️</span>Ajustes</button>
+    <button data-tab="cards"><span>🎫</span>Cartillas</button>
+    <button data-tab="game"><span>▶️</span>Juego</button>
+    <button data-tab="check"><span>✅</span>Comprobar</button>
+  </nav>
+
+  <dialog id="card-dialog"></dialog>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="print-area" aria-hidden="true"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

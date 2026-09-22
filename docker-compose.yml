@@ -1,0 +1,23 @@
+services:
+  web-project-julia:
+    image: nginx:alpine
+    container_name: web-project-julia
+    restart: unless-stopped
+    # Sin `ports`: solo se llega a través del Caddy (juliatogr.myaddr.io -> web-project-julia:5173).
+    expose:
+      - "5173"
+    volumes:
+      # La app se monta tal cual: los cambios se ven al recargar, sin reconstruir nada.
+      - ./:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      # IP fija: Caddy la usa vía /etc/hosts (ver el compose de web-gateway) para no depender
+      # del DNS interno de Docker, que en este host falla de forma intermitente (bug conocido,
+      # "server misbehaving" en 127.0.0.11). Si se cambia, hay que actualizar también ese extra_hosts.
+      web-gateway:
+        ipv4_address: 172.29.0.250
+
+networks:
+  web-gateway:
+    name: web_gateway
+    external: true
