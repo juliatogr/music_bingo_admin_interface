@@ -15,8 +15,39 @@ services:
         ipv4_address: 172.29.0.250
         aliases:
           - web-project-julia
+    depends_on:
+      - api
+
+  api:
+    # Sin Dockerfile: la imagen oficial de Node y `node server.js` (mismo entrypoint que en
+    # local/WebStorm) son suficientes; sin dependencias que instalar tampoco aquí.
+    image: node:24-alpine
+    container_name: web-project-julia-api
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.js"]
+    expose:
+      - "3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DB_PATH=/data/bingo.db
+      - SESSION_SECRET=${SESSION_SECRET:?Falta SESSION_SECRET (ver .env)}
+    volumes:
+      - ./:/app:ro
+      - web-project-julia_data:/data
+    networks:
+      web-gateway:
+        # IP fija, igual que en el otro servicio: nginx habla con esta IP directamente en
+        # su `proxy_pass` (ver nginx.conf) en vez de por nombre, para no depender del DNS
+        # interno de Docker en este host, que falla de forma intermitente (bug conocido de
+        # checksum offload). Si cambias esta IP, actualiza también nginx.conf.
+        ipv4_address: 172.29.0.251
 
 networks:
   web-gateway:
     name: web_gateway
     external: true
+
+volumes:
+  web-project-julia_data:

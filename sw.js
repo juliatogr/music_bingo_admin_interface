@@ -1,10 +1,11 @@
 // Service worker: la app funciona sin conexión (menos Spotify, que siempre va por red).
-const CACHE = 'bingo-v2';
+const CACHE = 'bingo-v3';
 const SHELL = [
   './',
   'index.html',
   'css/style.css',
   'js/app.js',
+  'js/backend.js',
   'js/bingo.js',
   'js/config.js',
   'js/spotify.js',

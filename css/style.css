@@ -126,6 +126,7 @@ button.huge { font-size: 1.3rem; min-height: 64px; margin-top: .8rem; }
 }
 .row-card:last-child { border-bottom: 0; }
 .row-card .tag { font-weight: 700; flex: 1 1 6rem; }
+.row-card.active { background: #12321c; }
 .stat { font-size: .8rem; padding: .15rem .5rem; border-radius: 99px; background: var(--panel2); color: var(--muted); }
 .stat.warn { background: #46360a; color: var(--warn); }
 .stat.ok { background: #14401f; color: #7ff0a0; font-weight: 700; }

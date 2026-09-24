@@ -1,11 +1,27 @@
 import * as sp from './spotify.js';
 import { CONFIG } from './config.js';
 import { PRIZES, PRIZE_LABEL, generateGame, rankMap, evaluate, summarize, findCard, checkClaim, cornerIndexes } from './bingo.js';
+import {
+  syncServerSession,
+  serverLogout,
+  listServerGames,
+  createServerGame,
+  loadServerGame,
+  saveServerGame,
+} from './backend.js';
 
 // ---------- Estado y persistencia ----------
+//
+// Fuente de la verdad mientras no hay sesión de Spotify: el localStorage de este navegador
+// (como siempre; modo demo se queda así para siempre, sin servidor de por medio).
+//
+// Con sesión, cada partida generada se crea como un registro propio en el servidor
+// (`state.currentGameId`) y cada `save()` la actualiza ahí también. Desde otro dispositivo, con
+// la misma cuenta de Spotify, se ve el listado de partidas (`ui.games`, pestaña Cartillas) y se
+// elige cuál continuar — no se adivina sola cuál, puede haber varias abiertas a la vez.
 
 const STATE_KEY = 'bingo.state.v1';
-const defaults = () => ({ playlist: null, config: { n: 20, rows: 3, cols: 5, pool: 60 }, game: null });
+const defaults = () => ({ playlist: null, config: { n: 20, rows: 3, cols: 5, pool: 60 }, game: null, updatedAt: 0, currentGameId: null });
 
 function loadState() {
   try {
@@ -14,12 +30,18 @@ function loadState() {
     return defaults();
   }
 }
+/** Lo único que se manda al servidor: nunca el `currentGameId` (es solo bookkeeping local). */
+function gameBlob() {
+  return { playlist: state.playlist, config: state.config, game: state.game, updatedAt: state.updatedAt };
+}
 function save() {
+  state.updatedAt = Date.now();
   try {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   } catch {
     toast('No se pudo guardar en este navegador (¿almacenamiento lleno?).', 'error');
   }
+  if (ui.serverSession && state.currentGameId) saveServerGame(state.currentGameId, gameBlob()); // en segundo plano
 }
 
 const state = loadState();
@@ -36,6 +58,9 @@ const ui = {
   sort: 'n',
   showGuarantee: false, // la garantía empieza borrosa para no destripar la partida
   wake: null,
+  serverSession: false, // hay cookie de sesión válida contra nuestra API
+  accountName: null,
+  games: [], // resumen de las partidas guardadas en el servidor para esta cuenta
 };
 
 // ---------- Utilidades ----------
@@ -109,6 +134,9 @@ function renderStatus() {
   }
   $('#btn-connect').textContent = sp.isConnected() ? 'Reconectar' : 'Conectar';
   $('#btn-disconnect').hidden = !sp.isConnected();
+  const info = $('#account-info');
+  info.hidden = !ui.accountName;
+  if (ui.accountName) info.textContent = `Partida sincronizada como ${ui.accountName}: se recupera igual en cualquier dispositivo donde inicies sesión.`;
 }
 
 function renderPlaylists() {
@@ -183,7 +211,40 @@ function cardGridHtml(card, g, opts = {}) {
   return `<div class="grid${print ? ' print' : ''}" style="--cols:${g.cols}">${cells}</div>`;
 }
 
+function renderGamesList() {
+  const box = $('#games-list');
+  if (!ui.serverSession) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  if (!ui.games.length) {
+    box.innerHTML = `<div class="card"><h3>Tus partidas</h3><p class="muted small-text">Ninguna guardada todavía con ${esc(ui.accountName || 'esta cuenta')}; genera cartillas abajo.</p></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="card list">
+    <h3>Tus partidas <span class="muted small-text">(${esc(ui.accountName || '')})</span></h3>
+    ${ui.games
+      .map((gm) => {
+        const label = gm.demo ? 'Demo' : gm.playlistName || 'Sin lista';
+        const active = gm.id === state.currentGameId;
+        return `<button class="row-card${active ? ' active' : ''}" data-action="open-server-game" data-id="${esc(gm.id)}">
+          <span class="tag">${esc(label)}${active ? ' <span class="muted small-text">(esta)</span>' : ''}</span>
+          <span class="stat">${gm.pos}/${gm.total} canciones</span>
+          <span class="muted small-text">${new Date(gm.updatedAt).toLocaleString()}</span>
+        </button>`;
+      })
+      .join('')}
+  </div>`;
+}
+
+async function refreshGamesList() {
+  ui.games = await listServerGames();
+  renderGamesList();
+}
+
 function renderCardsTab() {
+  renderGamesList();
   const g = game();
   const cfg = state.config;
   $('#cfg-n').value = cfg.n;
@@ -447,7 +508,7 @@ function readConfig() {
   return cfg;
 }
 
-function generate() {
+async function generate() {
   setMsg('#gen-msg', '');
   if (!state.playlist) return setMsg('#gen-msg', 'Primero elige una lista de reproducción en Ajustes.');
   let cfg;
@@ -456,15 +517,24 @@ function generate() {
   } catch (e) {
     return setMsg('#gen-msg', e.message);
   }
-  if (game() && !confirm('Se descartarán las cartillas y el progreso de la partida actual. ¿Continuar?')) return;
+  if (game() && !confirm('Esto crea una partida nueva; la actual queda guardada tal cual y se puede retomar desde «Tus partidas». ¿Continuar?')) return;
   try {
     const g = generateGame({ tracks: state.playlist.tracks, n: cfg.n, rows: cfg.rows, cols: cfg.cols, pool: cfg.pool });
     state.config = cfg;
     state.game = { ...g, pos: 0, awarded: {}, demo: !!state.playlist.demo, createdAt: Date.now() };
+    state.currentGameId = null; // partida nueva: id nuevo si hay sesión, o ninguno en local/demo
     ui.playing = false;
     ui.lastCheck = null;
     ui.showGuarantee = false;
     save();
+    if (ui.serverSession && !state.playlist.demo) {
+      const id = await createServerGame(gameBlob());
+      if (id) {
+        state.currentGameId = id;
+        save(); // ahora sí queda enlazada con el servidor
+        await refreshGamesList();
+      }
+    }
     renderAll();
     toast(`Generadas ${g.cards.length} cartillas.`, 'ok');
   } catch (e) {
@@ -604,8 +674,12 @@ const actions = {
   },
   disconnect: () => {
     sp.logout();
+    serverLogout(); // en segundo plano; no bloquea la desconexión local
     ui.devices = [];
     ui.webDeviceId = null;
+    ui.serverSession = false;
+    ui.accountName = null;
+    ui.games = [];
     renderAll();
   },
   'reload-playlist': async () => {
@@ -619,6 +693,25 @@ const actions = {
   'toggle-guarantee': () => {
     ui.showGuarantee = !ui.showGuarantee;
     renderCardsTab();
+  },
+  'open-server-game': async (el) => {
+    const id = el.dataset.id;
+    if (id === state.currentGameId) return;
+    const remote = await loadServerGame(id);
+    if (!remote) return toast('No se pudo cargar esa partida.', 'error');
+    state.playlist = remote.state.playlist;
+    state.config = remote.state.config;
+    state.game = remote.state.game;
+    state.updatedAt = remote.updatedAt;
+    state.currentGameId = id;
+    ui.playing = false;
+    ui.lastCheck = null;
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch {}
+    renderAll();
+    showTab('game');
+    toast('Partida cargada.', 'ok');
   },
   print: printCards,
   'open-card': (el) => openCard(Number(el.dataset.n)),
@@ -693,6 +786,7 @@ async function init() {
     setMsg('#auth-msg', err);
   }
   if (sp.isConnected()) {
+    await syncAccountAndGame();
     // Cuenta y lista fijas: la primera vez que se conecta se carga la lista sola.
     if (!state.playlist || (state.playlist.id !== CONFIG.PLAYLIST_ID && !state.playlist.demo && !state.game)) {
       await loadFixedPlaylist();
@@ -702,6 +796,41 @@ async function init() {
   }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+/** Registra la sesión del servidor con el token de Spotify ya validado y trae el listado de
+ * partidas guardadas. Si este navegador ya venía siguiendo una (`currentGameId`) y sigue
+ * existiendo, se refresca por si hay una versión más reciente (jugada desde otro dispositivo);
+ * si es un dispositivo nuevo sin ninguna local, no se elige ninguna sola — puede haber varias,
+ * que el usuario escoja en «Tus partidas» (pestaña Cartillas). */
+async function syncAccountAndGame() {
+  try {
+    const token = await sp.getToken();
+    const info = await syncServerSession(token);
+    if (!info?.ok) return;
+    ui.serverSession = true;
+    ui.accountName = info.displayName;
+    await refreshGamesList();
+    if (state.currentGameId && ui.games.some((g) => g.id === state.currentGameId)) {
+      const remote = await loadServerGame(state.currentGameId);
+      if (remote && (remote.updatedAt || 0) > (state.updatedAt || 0)) {
+        state.playlist = remote.state.playlist;
+        state.config = remote.state.config;
+        state.game = remote.state.game;
+        state.updatedAt = remote.updatedAt;
+        try {
+          localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        } catch {}
+      }
+    } else if (state.currentGameId) {
+      // El id que teníamos ya no existe en el servidor (se borró, o es de otra cuenta).
+      state.currentGameId = null;
+    }
+    renderAll();
+    showTab(state.game ? 'game' : state.playlist ? 'cards' : 'setup');
+  } catch {
+    // Sin conexión con nuestro servidor: seguimos con lo que hubiera en este navegador.
   }
 }
 

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { handleApi } from './server/api.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT) || 5173;
@@ -21,11 +22,12 @@ const mime = {
 };
 
 // Ficheros que no forman parte de la app.
-const hidden = /^(\.|node_modules|package(-lock)?\.json$|server\.js$|serve\.ps1$|Dockerfile|docker-compose\.yml$|nginx\.conf$|README\.md$)/;
+const hidden = /^(\.|node_modules|server(\/|$)|data(\/|$)|package(-lock)?\.json$|serve\.ps1$|Dockerfile|docker-compose\.yml$|nginx\.conf$|README\.md$)/;
 
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
+    if (await handleApi(req, res, url)) return;
     let rel = normalize(decodeURIComponent(url.pathname)).replace(/^[/\\]+/, '');
     if (rel === '' || rel.endsWith(sep)) rel += 'index.html';
     const path = join(root, rel);
